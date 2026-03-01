@@ -441,7 +441,9 @@ app.post('/api/transaction', async (req, res) => {
         res.status(500).json({ error: 'Erro na requisição' });
     }
 });
-
+app.get("/api/health", (req, res)=>{
+    return res.json("⚙️🛠️🔧 API IS WORKING FINE")
+})
 app.listen(4000, () => {
     console.log("✅ SERVER IS RUNNING OK... ");
 });
