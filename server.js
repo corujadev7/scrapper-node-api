@@ -1,14 +1,20 @@
-// const puppeteer = require('puppeteer');
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+// server.js - ES Module version
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import axios from 'axios';
+import { wrapper } from 'axios-cookiejar-support';
+import tough from 'tough-cookie';
+import express from 'express';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 
-const axios = require("axios");
-const { wrapper } = require("axios-cookiejar-support");
-const tough = require("tough-cookie");
+// Configuração para __dirname em ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-const express = require('express');
-const cors = require('cors')
-require('dotenv').config()
+dotenv.config();
 
 const app = express();
 
@@ -37,6 +43,9 @@ const userAgents = [
     'Mozilla/5.0 (Linux; Android 13; SM-S908B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36'
 ];
 
+// Configura o plugin stealth
+puppeteer.use(StealthPlugin());
+
 // Função para selecionar proxy aleatório
 function getRandomProxy() {
     const randomIndex = Math.floor(Math.random() * proxyList.length);
@@ -64,7 +73,7 @@ function parseProxy(proxyString) {
                 username: matches[1],
                 password: matches[2],
                 host: matches[3],
-                port: matches[4]
+                port: parseInt(matches[4])
             };
         }
         return null;
@@ -120,8 +129,6 @@ async function buscarSegundaVia(cpf) {
         throw error;
     }
 }
-
-puppeteer.use(StealthPlugin());
 
 // Função principal do webscrapper que aceita proxy
 const webscrapper = async (url, proxyString = null) => {
@@ -387,7 +394,7 @@ app.post('/api/transaction', async (req, res) => {
     try {
         const { nome, cpf, amount, titulo } = req.body;
 
-        const email = nome.toLowerCase() + '@email.com'
+        const email = nome.toLowerCase() + '@email.com';
         const cpfLimpo = cpf.replace(/\D/g, '');
 
         const url = process.env.URL;
@@ -422,7 +429,7 @@ app.post('/api/transaction', async (req, res) => {
             }
         });
         
-        console.log(response.data)
+        console.log(response.data);
 
         const qrCode = response.data.pix.qrcode;
         const id = response.data.id;
@@ -436,5 +443,7 @@ app.post('/api/transaction', async (req, res) => {
 });
 
 app.listen(4000, () => {
-    console.log("✅ SERVER IS RUNNING OK... ")
+    console.log("✅ SERVER IS RUNNING OK... ");
 });
+
+export default app;
