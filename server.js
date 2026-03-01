@@ -3,7 +3,7 @@ import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import axios from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
-import tough from 'tough-cookie';
+import * as tough from 'tough-cookie'; // Changed from import tough from 'tough-cookie'
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
