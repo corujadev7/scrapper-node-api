@@ -1,4 +1,4 @@
-// Importações usando ES Modules
+// const puppeteer = require('puppeteer');
 import puppeteer from 'puppeteer-extra';
 import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import axios from 'axios';
@@ -10,8 +10,10 @@ import NodeCache from 'node-cache';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 
-// Configuração do dotenv
 dotenv.config();
+
+import { wrapper } from 'axios-cookiejar-support';
+import { CookieJar } from 'tough-cookie';
 
 const app = express();
 
@@ -58,9 +60,7 @@ class BrowserPool {
                     '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas',
                     '--disable-gpu',
-                    '--window-size=1280,720',
-                    '--disable-web-security',
-                    '--disable-features=IsolateOrigins,site-per-process'
+                    '--window-size=1280,720'
                 ]
             });
             this.browsers.push(browser);
@@ -93,8 +93,7 @@ const browserPool = new BrowserPool(2);
 // User Agents mais realistas e leves
 const userAgents = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
 ];
 
 // Delay otimizado
@@ -102,50 +101,34 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 const BASE = "https://www.niointernet.com.br";
 
-// Função para criar cliente com cookie jar - CORRIGIDA
-function createCookieClient() {
-    const cookieJar = new CookieJar();
-    // Cria cliente axios sem o wrapper primeiro
-    const client = axios.create({ 
-        timeout: 10000,
-        // O CookieJar será adicionado nas opções de cada requisição
-    });
-    
-    // Retorna o cliente com suporte a cookies via wrapper
-    return wrapper(client);
-}
-
 // Versão otimizada da busca
 async function buscarSegundaVia(cpf) {
-    const client = createCookieClient();
     const cookieJar = new CookieJar();
+    const client = wrapper(axios.create({ 
+        jar: cookieJar,
+        timeout: 10000 // Timeout de 10 segundos
+    }));
 
     try {
-        console.log(`🔍 Buscando dados para CPF: ${cpf}`);
-
-        // Primeira requisição - página principal para pegar cookies
-        await client.get(`${BASE}/ajuda/servicos/segunda-via/`, {
-            headers: { 
-                "User-Agent": userAgents[0],
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
-                "Cache-Control": "no-cache"
-            },
-            jar: cookieJar
-        });
-
-        // Segunda requisição - API com o CPF
-        const response = await client.get(`${BASE}/api/rest/invoices/document`, {
-            headers: {
-                "User-Agent": userAgents[0],
-                "Accept": "application/json, text/plain, */*",
-                "Referer": `${BASE}/ajuda/servicos/segunda-via/`,
-                "Origin": BASE,
-                "Document": cpf,
-                "token": "1234567890abcdef"
-            },
-            jar: cookieJar
-        });
+        // Faz requisições em paralelo quando possível
+        const [_, response] = await Promise.all([
+            client.get(`${BASE}/ajuda/servicos/segunda-via/`, {
+                headers: { "User-Agent": userAgents[0] }
+            }),
+            client.get(`${BASE}/api/rest/invoices/document`, {
+                headers: {
+                    "User-Agent": userAgents[0],
+                    "Accept": "application/json, text/plain, */*",
+                    "Referer": `${BASE}/ajuda/servicos/segunda-via/`,
+                    "Origin": BASE,
+                    "Document": cpf,
+                    "token": "1234567890abcdef"
+                }
+            }).catch(error => {
+                // Se falhar, retorna erro mas não quebra o fluxo
+                return { data: { redirect: null } };
+            })
+        ]);
 
         const url = response.data?.redirect;
         
@@ -153,18 +136,12 @@ async function buscarSegundaVia(cpf) {
             throw new Error('URL de redirecionamento não encontrada');
         }
         
-        console.log(`🔗 URL de redirecionamento: ${url}`);
-        
         // Web scraping direto sem rotação de proxies
         const dados = await webscrapperOtimizado(url);
         return dados;
 
     } catch (error) {
-        console.error("❌ Erro na busca:", error.message);
-        if (error.response) {
-            console.error("Status:", error.response.status);
-            console.error("Data:", error.response.data);
-        }
+        console.error("Erro na busca:", error.message);
         throw error;
     }
 }
@@ -182,7 +159,7 @@ const webscrapperOtimizado = async (url) => {
         page.on('request', (request) => {
             // Bloqueia recursos desnecessários
             const resourceType = request.resourceType();
-            if (['image', 'stylesheet', 'font', 'media', 'websocket'].includes(resourceType)) {
+            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
                 request.abort();
             } else {
                 request.continue();
@@ -192,13 +169,6 @@ const webscrapperOtimizado = async (url) => {
         // User Agent aleatório
         const userAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
         await page.setUserAgent(userAgent);
-
-        // Configurar viewport
-        await page.setViewport({
-            width: 1280,
-            height: 720,
-            deviceScaleFactor: 1,
-        });
 
         // Timeout reduzido
         await page.goto(url, { 
@@ -214,11 +184,11 @@ const webscrapperOtimizado = async (url) => {
                 visible: true 
             });
         } catch (e) {
-            console.log('⏰ Timeout na espera, continuando...');
+            console.log('Timeout na espera, continuando...');
         }
 
         // Extração mais rápida
-        const dados = await page.evaluate(() => {
+     const dados = await page.evaluate(() => {
             // Extrai informações do cliente
             const cpfElement = document.querySelector('.resultados__label');
             const nomeElement = document.querySelector('.resultados__name');
@@ -348,11 +318,7 @@ async function buscarSegundaViaAlternativo(cpf) {
         
         // Tenta extrair direto da página
         const dados = await page.evaluate(() => {
-            return { 
-                message: 'Página carregada', 
-                success: true,
-                url: window.location.href
-            };
+            return { message: 'Página carregada', success: true };
         });
         
         return dados;
@@ -376,18 +342,11 @@ browserPool.initialize().catch(console.error);
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-    console.log('🛑 Encerrando servidor...');
+    console.log('Encerrando servidor...');
     await browserPool.closeAll();
     process.exit(0);
 });
 
-// Export para Vercel
-export default app;
-
-// Inicia o servidor se não estiver no Vercel
-if (process.env.NODE_ENV !== 'production') {
-    const PORT = process.env.PORT || 4000;
-    app.listen(PORT, () => {
-        console.log(`✅ SERVER OTIMIZADO RODANDO NA PORTA ${PORT}`);
-    });
-}
+app.listen(4000, () => {
+    console.log("✅ SERVER OTIMIZADO RODANDO NA PORTA 4000");
+});
