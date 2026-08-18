@@ -11,6 +11,8 @@ dotenv.config();
 
 const app = express();
 
+app.set('trust proxy', 1);
+
 // Cache com TTL de 1 hora
 const cache = new NodeCache({ stdTTL: 3600 });
 
