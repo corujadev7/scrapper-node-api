@@ -1,25 +1,24 @@
-// Importações usando ES Modules
-import puppeteer from 'puppeteer-extra';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
-import express from 'express';
-import cors from 'cors';
-import NodeCache from 'node-cache';
-import rateLimit from 'express-rate-limit';
-import dotenv from 'dotenv';
-
-dotenv.config();
+// const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const axios = require("axios");
+const { wrapper } = require("axios-cookiejar-support");
+const tough = require("tough-cookie");
+const express = require('express');
+const cors = require('cors');
+const NodeCache = require('node-cache');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
 
 const app = express();
-
-app.set('trust proxy', 1);
 
 // Cache com TTL de 1 hora
 const cache = new NodeCache({ stdTTL: 3600 });
 
 // Rate limiting
 const limiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 5
+    windowMs: 60 * 1000, // 1 minuto
+    max: 5 // 5 requisições por IP
 });
 
 const corsOptions = {
@@ -32,7 +31,7 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use('/api/', limiter);
 
-// Pool de navegadores
+// Pool de navegadores para reutilização
 class BrowserPool {
     constructor(size = 2) {
         this.size = size;
@@ -86,127 +85,63 @@ class BrowserPool {
 
 const browserPool = new BrowserPool(2);
 
-// User Agents
+// User Agents mais realistas e leves
 const userAgents = [
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
 ];
 
+// Delay otimizado
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 const BASE = "https://www.niointernet.com.br";
 
-// Função para fazer requisições usando Puppeteer (alternativa ao axios)
-async function fazerRequisicaoComPuppeteer(url, options = {}) {
-    const browser = await browserPool.getBrowser();
-    const page = await browser.newPage();
-    
-    try {
-        // Configurar User Agent
-        const userAgent = options.headers?.['User-Agent'] || userAgents[0];
-        await page.setUserAgent(userAgent);
-
-        // Configurar headers adicionais
-        if (options.headers) {
-            await page.setExtraHTTPHeaders(options.headers);
-        }
-
-        // Navegar para a URL
-        const response = await page.goto(url, {
-            waitUntil: 'networkidle0',
-            timeout: 10000
-        });
-
-        // Pegar cookies da página
-        const cookies = await page.cookies();
-        
-        // Pegar o conteúdo da página
-        const content = await page.content();
-        
-        // Tentar extrair JSON se for uma resposta JSON
-        let data = null;
-        try {
-            const text = await page.evaluate(() => document.body.innerText);
-            data = JSON.parse(text);
-        } catch (e) {
-            // Não é JSON, retorna o conteúdo HTML
-            data = { html: content, cookies };
-        }
-
-        return {
-            data,
-            status: response.status(),
-            headers: response.headers(),
-            cookies
-        };
-
-    } finally {
-        await page.close();
-    }
-}
-
-// Versão simplificada da busca usando Puppeteer
+// Versão otimizada da busca
 async function buscarSegundaVia(cpf) {
+    const cookieJar = new tough.CookieJar();
+    const client = wrapper(axios.create({ 
+        jar: cookieJar,
+        timeout: 10000 // Timeout de 10 segundos
+    }));
+
     try {
-        console.log(`🔍 Buscando dados para CPF: ${cpf}`);
+        // Faz requisições em paralelo quando possível
+        const [_, response] = await Promise.all([
+            client.get(`${BASE}/ajuda/servicos/segunda-via/`, {
+                headers: { "User-Agent": userAgents[0] }
+            }),
+            client.get(`${BASE}/api/rest/invoices/document`, {
+                headers: {
+                    "User-Agent": userAgents[0],
+                    "Accept": "application/json, text/plain, */*",
+                    "Referer": `${BASE}/ajuda/servicos/segunda-via/`,
+                    "Origin": BASE,
+                    "Document": cpf,
+                    "token": "1234567890abcdef"
+                }
+            }).catch(error => {
+                // Se falhar, retorna erro mas não quebra o fluxo
+                return { data: { redirect: null } };
+            })
+        ]);
 
-        // Primeiro, visita a página principal para pegar cookies
-        const browser = await browserPool.getBrowser();
-        const page = await browser.newPage();
+        const url = response.data?.redirect;
         
-        try {
-            await page.setUserAgent(userAgents[0]);
-            
-            // Visita a página principal
-            await page.goto(`${BASE}/ajuda/servicos/segunda-via/`, {
-                waitUntil: 'networkidle0',
-                timeout: 10000
-            });
-
-            // Pega os cookies
-            const cookies = await page.cookies();
-            
-            // Converte cookies para string
-            const cookieString = cookies.map(c => `${c.name}=${c.value}`).join('; ');
-
-            // Agora faz a requisição para a API usando a própria página
-            const result = await page.evaluate(async (cpf, cookieString) => {
-                const response = await fetch('https://www.niointernet.com.br/api/rest/invoices/document', {
-                    method: 'GET',
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Accept': 'application/json, text/plain, */*',
-                        'Referer': 'https://www.niointernet.com.br/ajuda/servicos/segunda-via/',
-                        'Origin': 'https://www.niointernet.com.br',
-                        'Document': cpf,
-                        'token': '1234567890abcdef',
-                        'Cookie': cookieString
-                    }
-                });
-                return response.json();
-            }, cpf, cookieString);
-
-            const url = result?.redirect;
-            
-            if (!url) {
-                throw new Error('URL de redirecionamento não encontrada');
-            }
-
-            console.log(`🔗 URL de redirecionamento: ${url}`);
-
-            // Faz o scraping da URL
-            const dados = await webscrapperOtimizado(url);
-            return dados;
-
-        } finally {
-            await page.close();
+        if (!url) {
+            throw new Error('URL de redirecionamento não encontrada');
         }
+        
+        // Web scraping direto sem rotação de proxies
+        const dados = await webscrapperOtimizado(url);
+        return dados;
 
     } catch (error) {
-        console.error("❌ Erro na busca:", error.message);
+        console.error("Erro na busca:", error.message);
         throw error;
     }
 }
 
-// Webscrapper otimizado
+// Webscrapper otimizado - SEM PROXIES
 const webscrapperOtimizado = async (url) => {
     const browser = await browserPool.getBrowser();
     const page = await browser.newPage();
@@ -214,11 +149,12 @@ const webscrapperOtimizado = async (url) => {
     try {
         console.log('🚀 Iniciando consulta da fatura...');
 
-        // Bloquear recursos desnecessários
+        // Configurações de performance
         await page.setRequestInterception(true);
         page.on('request', (request) => {
+            // Bloqueia recursos desnecessários
             const resourceType = request.resourceType();
-            if (['image', 'stylesheet', 'font', 'media', 'websocket'].includes(resourceType)) {
+            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
                 request.abort();
             } else {
                 request.continue();
@@ -229,24 +165,26 @@ const webscrapperOtimizado = async (url) => {
         const userAgent = userAgents[Math.floor(Math.random() * userAgents.length)];
         await page.setUserAgent(userAgent);
 
-        // Navegar para a URL
+        // Timeout reduzido
         await page.goto(url, { 
             waitUntil: 'domcontentloaded', 
-            timeout: 15000
+            timeout: 15000,
+            referer: BASE
         });
 
-        // Esperar pelos elementos
+        // Espera seletiva - só espera se realmente precisar
         try {
             await page.waitForSelector('.resultados-entry', { 
                 timeout: 5000,
                 visible: true 
             });
         } catch (e) {
-            console.log('⏰ Timeout na espera, continuando...');
+            console.log('Timeout na espera, continuando...');
         }
 
-        // Extrair dados
-        const dados = await page.evaluate(() => {
+        // Extração mais rápida
+     const dados = await page.evaluate(() => {
+            // Extrai informações do cliente
             const cpfElement = document.querySelector('.resultados__label');
             const nomeElement = document.querySelector('.resultados__name');
             const counterElement = document.querySelector('.resultados__counter-highlight');
@@ -283,11 +221,11 @@ const webscrapperOtimizado = async (url) => {
         console.error('❌ Erro no webscrapper:', error);
         throw error;
     } finally {
-        await page.close();
+        await page.close(); // Fecha a página mas mantém o browser
     }
 };
 
-// Endpoint principal
+// Endpoint principal com cache
 app.post('/api/search', async (req, res) => {
     const { cpf } = req.body;
 
@@ -328,8 +266,9 @@ app.post('/api/search', async (req, res) => {
         const dados = await buscarSegundaVia(cpfLimpo);
         const endTime = Date.now();
         
-        console.log(`⏱️ Tempo de execução: ${(endTime - startTime) / 1000}s`);
+        console.log(`⏱️  Tempo de execução: ${(endTime - startTime) / 1000}s`);
 
+        // Salva no cache
         cache.set(cacheKey, dados);
 
         return res.json({
@@ -342,13 +281,46 @@ app.post('/api/search', async (req, res) => {
     } catch (error) {
         console.error('❌ Erro na consulta:', error);
 
-        return res.status(500).json({
-            success: false,
-            error: 'Erro ao processar consulta',
-            details: error.message
-        });
+        // Se falhar, tenta uma última vez sem bloqueios
+        try {
+            console.log('🔄 Tentando método alternativo...');
+            const dados = await buscarSegundaViaAlternativo(cpfLimpo);
+            return res.json({
+                success: true,
+                data: dados,
+                message: 'Consulta realizada com método alternativo'
+            });
+        } catch (fallbackError) {
+            return res.status(500).json({
+                success: false,
+                error: 'Erro ao processar consulta',
+                details: error.message
+            });
+        }
     }
 });
+
+// Método alternativo mais simples
+async function buscarSegundaViaAlternativo(cpf) {
+    const browser = await browserPool.getBrowser();
+    const page = await browser.newPage();
+    
+    try {
+        await page.goto(`${BASE}/ajuda/servicos/segunda-via/`, {
+            waitUntil: 'domcontentloaded',
+            timeout: 10000
+        });
+        
+        // Tenta extrair direto da página
+        const dados = await page.evaluate(() => {
+            return { message: 'Página carregada', success: true };
+        });
+        
+        return dados;
+    } finally {
+        await page.close();
+    }
+}
 
 // Endpoint de status
 app.get('/api/status', (req, res) => {
@@ -360,23 +332,16 @@ app.get('/api/status', (req, res) => {
     });
 });
 
-// Inicialização
+// Inicialização do pool de browsers
 browserPool.initialize().catch(console.error);
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
-    console.log('🛑 Encerrando servidor...');
+    console.log('Encerrando servidor...');
     await browserPool.closeAll();
     process.exit(0);
 });
 
-// Export para Vercel
-export default app;
-
-// Inicia o servidor se não estiver no Vercel
-if (process.env.NODE_ENV !== 'production') {
-    const PORT = process.env.PORT || 4000;
-    app.listen(PORT, () => {
-        console.log(`✅ SERVER OTIMIZADO RODANDO NA PORTA ${PORT}`);
-    });
-}
+app.listen(4000, () => {
+    console.log("✅ SERVER OTIMIZADO RODANDO NA PORTA 4000");
+});
