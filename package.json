@@ -6,14 +6,14 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "nodemon server.js",
-    "start":"node server.js"
+    "start": "node server.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+   "type": "module",
   "dependencies": {
-    "axios": "^1.13.5",
+    "axios": "^1.19.0",
     "axios-cookiejar-support": "^6.0.5",
     "cheerio": "^1.2.0",
     "compression": "^1.8.1",
@@ -24,10 +24,10 @@
     "helmet": "^8.1.0",
     "morgan": "^1.10.1",
     "node-cache": "^5.1.2",
-    "puppeteer": "^24.37.5",
+    "puppeteer": "^25.8.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "tough-cookie": "^6.0.0"
+    "tough-cookie": "^6.0.2"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

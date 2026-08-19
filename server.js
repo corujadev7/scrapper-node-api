@@ -1,15 +1,19 @@
 // const puppeteer = require('puppeteer');
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const axios = require("axios");
-const { wrapper } = require("axios-cookiejar-support");
-const tough = require("tough-cookie");
-const express = require('express');
-const cors = require('cors');
-const NodeCache = require('node-cache');
-const rateLimit = require('express-rate-limit');
-require('dotenv').config();
+import puppeteer from 'puppeteer-extra';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+import axios from 'axios';
+import { wrapper } from 'axios-cookiejar-support';
+import { CookieJar } from 'tough-cookie';
+import express from 'express';
+import cors from 'cors';
+import NodeCache from 'node-cache';
+import rateLimit from 'express-rate-limit';
+import dotenv from 'dotenv';
 
+dotenv.config();
+
+
+const jar = new CookieJar();
 const app = express();
 
 // Cache com TTL de 1 hora
@@ -98,7 +102,7 @@ const BASE = "https://www.niointernet.com.br";
 
 // Versão otimizada da busca
 async function buscarSegundaVia(cpf) {
-    const cookieJar = new tough.CookieJar();
+    const cookieJar = new CookieJar();
     const client = wrapper(axios.create({ 
         jar: cookieJar,
         timeout: 10000 // Timeout de 10 segundos
